@@ -41,6 +41,9 @@ The library has three responsibilities:
 - Tests against real PostgreSQL.
 
 ### Out of scope (v1) — candidates for later
+- **True cross-tenant bypass** via a second engine bound to a `BYPASSRLS` role (§4.5).
+  v1 `bypass()` only emits no context (fail-closed); the privileged-engine pattern is
+  documented, not built.
 - Alembic **autogenerate** integration (detect policy drift automatically).
 - Hierarchical RLS via recursive CTEs / nested organizations (django-rls has this).
 - `TENANT_MEMBERSHIP_VALIDATOR` enforcement in the request path.
