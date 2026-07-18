@@ -286,14 +286,15 @@ Mirrors django-rls's `DJANGO_RLS` dict as flat Flask config keys:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `RLS_TENANT_GUC` | `rls.tenant_id` | GUC name for tenant context |
-| `RLS_USER_GUC` | `rls.user_id` | GUC name for user context |
-| `RLS_G_TENANT_KEY` | `tenant_id` | `flask.g` attribute for tenant |
-| `RLS_G_USER_KEY` | `user_id` | `flask.g` attribute for user |
-| `RLS_DEFAULT_ROLES` | `public` | default `TO` roles for policies |
-| `RLS_DEFAULT_PERMISSIVE` | `True` | permissive vs restrictive policies |
+| `RLS_GUC_PREFIX` | `rls.` | GUC namespace prefix; the full GUC is `<prefix><key>` |
+| `RLS_G_TENANT_KEY` | `tenant_id` | `flask.g` attribute read for the tenant |
+| `RLS_G_USER_KEY` | `user_id` | `flask.g` attribute read for the user |
 | `RLS_REQUIRE_CONTEXT` | `False` | raise `RLSContextRequiredError` when context missing |
 | `RLS_DEBUG` | `False` | debug logging of emitted `set_config` calls |
+
+Policy-level defaults (`roles`, default `"public"`; `permissive`, default `True`) live on
+the policy classes in `flask_rls.policies` and are overridable per policy, since policies are
+typically defined at migration time outside any Flask app context.
 
 ## 10. CLI
 
@@ -337,7 +338,7 @@ RLS is unenforceable on SQLite, so behavior tests require **real PostgreSQL**
 ## 13. Packaging & tooling
 
 - `pyproject.toml` with hatchling.
-- Python 3.9+ (align with django-rls's floor where reasonable), `SQLAlchemy>=2.0`,
+- Python 3.10+ (Python 3.9 is EOL; matches django-rls's floor), `SQLAlchemy>=2.0`,
   `Flask>=2.2`. Alembic is an optional extra: `flask-rls[alembic]`.
 - Ruff (lint + format), mypy (typed public API), pytest + coverage.
 - GitHub Actions: lint/type job + test matrix across Python versions with a Postgres
