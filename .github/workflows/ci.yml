@@ -29,21 +29,50 @@ jobs:
       - name: Mypy
         run: uv run mypy
 
+  # Version support matrix. Rather than the full cartesian product of every
+  # Python × Flask × SQLAlchemy × PostgreSQL (100+ jobs), each dimension we claim
+  # to support is swept at least once, and the minimum ("floor") dependencies are
+  # pinned in a dedicated job. The Postgres image is chosen per job via
+  # FLASK_RLS_TEST_POSTGRES_IMAGE, which the integration conftest reads.
   test:
+    name: py${{ matrix.python }} · pg${{ matrix.postgres }} · ${{ matrix.label }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          # Python sweep (latest Flask/SQLAlchemy, current Postgres)
+          - { python: "3.10", postgres: "16", label: "latest" }
+          - { python: "3.11", postgres: "16", label: "latest" }
+          - { python: "3.12", postgres: "16", label: "latest" }
+          - { python: "3.13", postgres: "16", label: "latest" }
+          # PostgreSQL sweep (every supported major, on a stable Python)
+          - { python: "3.12", postgres: "12", label: "latest" }
+          - { python: "3.12", postgres: "13", label: "latest" }
+          - { python: "3.12", postgres: "14", label: "latest" }
+          - { python: "3.12", postgres: "15", label: "latest" }
+          - { python: "3.12", postgres: "17", label: "latest" }
+          # Minimum supported dependencies (Flask 2.2, SQLAlchemy 2.0)
+          - { python: "3.10", postgres: "16", label: "floor-deps",
+              pins: "flask==2.2.* werkzeug==2.2.* sqlalchemy==2.0.*" }
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
         uses: astral-sh/setup-uv@v5
       - name: Create environment
         run: |
-          uv venv --python ${{ matrix.python-version }}
+          uv venv --python ${{ matrix.python }}
           uv pip install -e ".[test]"
-      # Integration tests spin up PostgreSQL via Testcontainers; Docker is available
-      # on GitHub-hosted Ubuntu runners out of the box.
+      - name: Pin floor dependencies
+        if: ${{ matrix.pins }}
+        env:
+          PINS: ${{ matrix.pins }}
+        run: |
+          read -ra SPECS <<< "$PINS"
+          uv pip install "${SPECS[@]}"
+      # Integration tests spin up PostgreSQL via Testcontainers; Docker is
+      # available on GitHub-hosted Ubuntu runners out of the box.
       - name: Test
+        env:
+          FLASK_RLS_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}-alpine
         run: uv run pytest --cov=flask_rls --cov-report=term-missing
