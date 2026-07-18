@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flask-rls"
+dynamic = ["version"]
+description = "PostgreSQL Row-Level Security for Flask and SQLAlchemy"
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.10"
+authors = [{ name = "Kuldeep Pisda", email = "pisdak79@gmail.com" }]
+keywords = ["flask", "sqlalchemy", "postgresql", "rls", "row-level-security", "multi-tenant"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Flask",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Security",
+]
+dependencies = [
+    "Flask>=2.2",
+    "SQLAlchemy>=2.0",
+]
+
+[project.optional-dependencies]
+alembic = ["alembic>=1.9"]
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "alembic>=1.9",
+    "psycopg[binary]>=3.1",
+    "testcontainers[postgres]>=4.0",
+]
+dev = [
+    "flask-rls[test]",
+    "ruff>=0.5",
+    "mypy>=1.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/kdpisda/flask-rls"
+Repository = "https://github.com/kdpisda/flask-rls"
+Issues = "https://github.com/kdpisda/flask-rls/issues"
+
+[tool.hatch.version]
+path = "flask_rls/__version__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["flask_rls"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: tests that require a live PostgreSQL database (Docker)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+disallow_untyped_defs = true
+packages = ["flask_rls"]
