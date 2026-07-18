@@ -1,0 +1,19 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Flask RLS logo">
+  <defs>
+    <linearGradient id="frls-grad" x1="0" y1="0" x2="200" y2="200" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+  </defs>
+  <!-- Shield -->
+  <path d="M100 16 L172 44 V96 C172 142 140 172 100 186 C60 172 28 142 28 96 V44 Z"
+        fill="url(#frls-grad)"/>
+  <!-- Inner shield -->
+  <path d="M100 34 L156 56 V96 C156 132 132 156 100 168 C68 156 44 132 44 96 V56 Z"
+        fill="#0b1220" opacity="0.9"/>
+  <!-- Keyhole -->
+  <circle cx="100" cy="92" r="18" fill="url(#frls-grad)"/>
+  <rect x="92" y="100" width="16" height="34" rx="6" fill="url(#frls-grad)"/>
+  <!-- Row lines -->
+  <rect x="70" y="150" width="60" height="5" rx="2.5" fill="url(#frls-grad)" opacity="0.5"/>
+</svg>
