@@ -30,7 +30,7 @@ The library has three responsibilities:
 ### In scope (v1)
 - SQLAlchemy Core integration at the `Engine` level (ORM-agnostic — works with bare
   SQLAlchemy or Flask-SQLAlchemy).
-- Per-transaction context via `SET LOCAL` on the engine `begin` event.
+- Per-transaction context via `set_config(..., is_local=true)` on the engine `begin` event.
 - Pluggable context providers (default: Flask `g`), plus `override()` and `bypass()`
   context managers for non-request code.
 - Policy classes: `TenantPolicy`, `UserPolicy`, `CustomPolicy`, `ExpressionPolicy`.
@@ -48,45 +48,55 @@ The library has three responsibilities:
 
 ## 3. Core mechanism
 
-### 3.1 Why `SET LOCAL`
+### 3.1 Why `set_config(..., is_local=true)`
 Postgres RLS policies read the current context through a custom GUC, e.g.
 `current_setting('rls.tenant_id', true)`. The value must be set on the connection that
-runs the query. Two strategies exist:
+runs the query. flask-rls sets it with the function form:
 
-- **`SET LOCAL` on transaction begin (chosen).** Transaction-scoped; Postgres
-  automatically resets it on `COMMIT`/`ROLLBACK`. It therefore *cannot* leak across
-  pooled connections. This is the safe default for multi-tenant isolation.
-- `SET SESSION` on pool checkout + `RESET` on checkin (rejected). Works outside
-  explicit transactions but a missed reset leaks one tenant's context into the next
-  request served by that pooled connection.
+```sql
+SELECT set_config('rls.tenant_id', :value, true)
+```
 
-This is a deliberate improvement over django-rls, which sets the GUC per request on the
-connection and clears it on teardown/`reset_connection_rls_context`.
+- **`set_config(name, value, is_local)` with `is_local = true`.** The `is_local=true`
+  flag makes it **transaction-scoped** — exactly like `SET LOCAL` — so Postgres
+  automatically discards it on `COMMIT`/`ROLLBACK` and it *cannot* leak across pooled
+  connections. This is the safe default for multi-tenant isolation, and it is the same
+  primitive django-rls uses (`_db_set_config` → `SELECT set_config(...)`).
+- **Why not literal `SET LOCAL rls.x = :value`?** `SET`/`SET LOCAL` is DDL-like syntax
+  that **cannot take a bind parameter** — `SET LOCAL rls.tenant_id = %s` is a syntax
+  error. `set_config()` is an ordinary function call, so both the GUC name and the value
+  are passed as bound parameters, eliminating string interpolation entirely.
+- **Session-scoped alternative (rejected).** `set_config(..., false)` (or `SET SESSION`)
+  on pool checkout persists on the connection; a missed reset leaks one tenant's context
+  into the next request served by that pooled connection. django-rls defaults its
+  `set_rls_context` to `is_local=False` (session) and relies on middleware teardown +
+  `reset_connection_rls_context` to scrub it. flask-rls uses `is_local=True` instead, so
+  there is nothing to scrub — a deliberate improvement.
 
 ### 3.2 Binding
 `RLS.init_app(app, engine=...)` registers a listener on the SQLAlchemy `Engine`'s
 `"begin"` event. On each transaction begin the handler:
 
 1. Resolves the active context (see §4).
-2. For each `(key, value)` emits `SET LOCAL rls.<key> = :value` via
-   `conn.exec_driver_sql` with the value passed as a bound parameter (never string
-   interpolation).
+2. For each `(key, value)` executes `SELECT set_config('rls.<key>', :value, true)` via
+   `conn.exec_driver_sql` with both the GUC name and value passed as bound parameters
+   (never string interpolation).
 
 Because SQLAlchemy 2.0 autobegins a transaction for every statement, the `begin` event
-fires for both explicit and implicit transactions, so `SET LOCAL` always lands inside
-the transaction it applies to. This hook is ORM-agnostic: Flask-SQLAlchemy sessions and
-bare Core connections share the same engine and fire the same event.
+fires for both explicit and implicit transactions, so the `set_config` call always lands
+inside the transaction it applies to. This hook is ORM-agnostic: Flask-SQLAlchemy
+sessions and bare Core connections share the same engine and fire the same event.
 
-> **Constraint:** `SET LOCAL` has no effect outside a transaction block. Code running in
-> driver-level autocommit (no transaction) will not carry context. This is documented; the
+> **Constraint:** `is_local=true` has no effect outside a transaction block. Code running
+> in driver-level autocommit (no transaction) will not carry context. This is documented;
 > normal SQLAlchemy/Flask-SQLAlchemy usage is always transactional.
 
 ## 4. Context resolution
 
 ### 4.1 Multi-key context
 Context is not tenant-only. Mirroring django-rls's context processors, the extension
-resolves a `dict[str, value]` each transaction and emits one `SET LOCAL rls.<key>` per
-entry. Default keys: `tenant_id`, `user_id`.
+resolves a `dict[str, value]` each transaction and emits one
+`set_config('rls.<key>', value, true)` per entry. Default keys: `tenant_id`, `user_id`.
 
 ### 4.2 Providers
 A **context provider** is a callable returning `dict[str, value]` (or `{}`). The built-in
@@ -118,18 +128,41 @@ Generated policies read the GUC with the missing-ok form
 
 `RLS_REQUIRE_CONTEXT` (default `False`, mirrors django's `REQUIRE_CONTEXT`) upgrades this
 to a loud failure: if a transaction begins with no resolvable context and no active
-`bypass()`, raise `RLSContextError`. This turns silent empty-result bugs into errors in
-development.
+`bypass()`, raise `RLSContextRequiredError`. This turns silent empty-result bugs into
+errors in development.
 
-### 4.5 Bypass and the owner-bypass gotcha
-`with rls.bypass():` runs a transaction with no tenant/user GUC — for login, tenant
-creation, and admin/system jobs.
+### 4.5 "Bypass": what it does and does not mean
+`with rls.bypass():` runs a transaction that emits **no** tenant/user context. This is
+**not** god-mode. On an RLS-protected table, no context → `current_setting` is NULL →
+zero rows (fail closed). So `bypass()` is only useful for:
 
-**Critical Postgres behavior:** a table's owner (and superusers) bypass RLS *unless* the
-table is set to `FORCE ROW LEVEL SECURITY`. So `bypass()` only means something if the
-app's normal DB role is a non-owner, **or** policies use `FORCE`. The policy helpers
-always emit `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to close this gap, and this
-requirement is documented prominently.
+- work that touches **non-RLS tables** (e.g. inserting into a `tenants` registry, a
+  global `settings` table), and
+- **asserting isolation** in tests (prove that unset context sees nothing).
+
+**True cross-tenant access (an admin that reads every tenant's rows) is intentionally NOT
+provided in v1**, mirroring django-rls, whose `without_rls()` raises
+`NotImplementedError("Bypassing RLS requires special privileges")`. Real bypass requires
+a PostgreSQL role with the `BYPASSRLS` attribute (or a role exempt from the policy's `TO`
+clause). The documented pattern is to run privileged jobs through a **separate SQLAlchemy
+engine bound to a `BYPASSRLS` role**; wiring that second engine is out of v1 scope but
+called out in the docs so nobody mistakes `bypass()` for god-mode.
+
+**The owner-bypass gotcha (why `FORCE`):** a table's owner (and superusers) skip RLS
+*entirely* unless the table has `FORCE ROW LEVEL SECURITY`. So even correct policies do
+nothing if the app connects as the table owner. The policy helpers always emit
+`ALTER TABLE ... FORCE ROW LEVEL SECURITY`, and the docs state the app's normal DB role
+should be a non-owner regardless.
+
+### 4.6 Identity immutability
+Mirroring django-rls's protected-identity guarantee: within a single resolved scope,
+`tenant_id`/`user_id` are **established once**. flask-rls resolves context fresh at each
+transaction begin from providers (§4.2), so there is no long-lived mutable connection
+state to protect — the contextvar scoping of `override()`/`bypass()` provides the same
+"can't be silently changed mid-scope" property structurally. `override()` is the *only*
+sanctioned way to switch an already-established identity (the analog of django-rls's
+`system_rls_context`); an attempt to change a locked identity key through a non-privileged
+path raises `RLSContextImmutableError`.
 
 ## 5. Policy classes
 
@@ -204,12 +237,18 @@ wrapping the §6 generators and emitting SQL through `op.execute`:
 op.enable_rls("invoices")
 op.force_rls("invoices")
 op.create_policy("invoices", TenantPolicy("tenant_isolation", "tenant_id", cast="uuid"))
+op.alter_policy("invoices", TenantPolicy("tenant_isolation", "tenant_id", cast="uuid"))
 op.drop_policy("invoices", "tenant_isolation")
 ```
 
-Each has a reverse for `downgrade()` where meaningful (`create_policy` ↔ `drop_policy`,
-`enable_rls` ↔ `disable_rls`). Shipped under the `flask-rls[alembic]` extra so Alembic
-is not a hard dependency.
+Operation set mirrors django-rls's `migration_operations` (`EnableRLS`, `DisableRLS`,
+`CreatePolicy`, `AlterPolicy`, `DropPolicy`) plus flask-rls's `force_rls`. Each has a
+reverse for `downgrade()` where meaningful: `enable_rls` ↔ `disable_rls`,
+`create_policy` ↔ `drop_policy`. `alter_policy` implements as drop-then-create (Postgres
+has no `ALTER POLICY` for the full USING/CHECK change in all versions, so recreate is the
+portable path); its reverse requires the prior definition and is a no-op unless supplied,
+matching django-rls's `AlterPolicy.database_backwards`. Shipped under the
+`flask-rls[alembic]` extra so Alembic is not a hard dependency.
 
 ## 8. Flask extension API
 
@@ -231,8 +270,8 @@ def create_app():
 with rls.override(tenant_id=42):
     run_report()
 
-with rls.bypass():                 # privileged/system work
-    create_new_tenant()
+with rls.bypass():                 # emit no RLS context — for non-RLS tables
+    create_new_tenant()            # (a `tenants` registry is typically not RLS-protected)
 ```
 
 `RLS` supports both the direct (`RLS(app, engine=...)`) and factory
@@ -250,8 +289,8 @@ Mirrors django-rls's `DJANGO_RLS` dict as flat Flask config keys:
 | `RLS_G_USER_KEY` | `user_id` | `flask.g` attribute for user |
 | `RLS_DEFAULT_ROLES` | `public` | default `TO` roles for policies |
 | `RLS_DEFAULT_PERMISSIVE` | `True` | permissive vs restrictive policies |
-| `RLS_REQUIRE_CONTEXT` | `False` | raise `RLSContextError` when context missing |
-| `RLS_DEBUG` | `False` | debug logging of emitted `SET LOCAL` |
+| `RLS_REQUIRE_CONTEXT` | `False` | raise `RLSContextRequiredError` when context missing |
+| `RLS_DEBUG` | `False` | debug logging of emitted `set_config` calls |
 
 ## 10. CLI
 
@@ -263,9 +302,15 @@ A Flask CLI group registered on `init_app`:
 
 ## 11. Exceptions (`exceptions.py`)
 
+Names mirror django-rls for sibling consistency (django's `BackendError` is dropped — it
+is Django-DB-backend-specific and has no flask-rls analog):
+
 - `RLSError` — base.
 - `PolicyError(RLSError)` — invalid policy configuration (bad name/operation/role/field).
-- `RLSContextError(RLSError)` — required context missing (`RLS_REQUIRE_CONTEXT`).
+- `ConfigurationError(RLSError)` — invalid/missing extension configuration.
+- `RLSContextRequiredError(RLSError)` — required context missing (`RLS_REQUIRE_CONTEXT`).
+- `RLSContextImmutableError(RLSError)` — attempt to change an already-established
+  identity key without a privileged (`override()`) switch. See §4.6.
 - `TenantAccessDeniedError(RLSError)` — reserved for membership validation (mirrors
   django-rls; enforcement is a later milestone).
 
@@ -280,8 +325,8 @@ RLS is unenforceable on SQLite, so behavior tests require **real PostgreSQL**
 - **Integration (Postgres):** two DB roles —
   1. a **non-owner app role** where RLS applies: cross-tenant isolation (tenant A cannot
      see tenant B's rows), `SELECT`/`INSERT`/`UPDATE`/`DELETE` policies, fail-closed when
-     context unset, `override`/`bypass` behavior, and `SET LOCAL` not leaking across
-     transactions on a pooled connection;
+     context unset, `override`/`bypass` behavior, and `is_local=true` context not leaking
+     across transactions on a pooled connection;
   2. the **table owner** with `FORCE ROW LEVEL SECURITY` to prove owner-bypass is closed.
 - **Pytest fixtures** (not class-based `setUp`), Postgres session fixture + per-test
   transaction rollback.
