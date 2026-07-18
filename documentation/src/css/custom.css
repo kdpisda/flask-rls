@@ -1,0 +1,27 @@
+/**
+ * Flask RLS — Docusaurus theme.
+ * Teal/sky palette to distinguish it from django-rls's green while staying in the family.
+ */
+
+:root {
+  --ifm-color-primary: #0d9488;
+  --ifm-color-primary-dark: #0c8579;
+  --ifm-color-primary-darker: #0b7d72;
+  --ifm-color-primary-darkest: #09675e;
+  --ifm-color-primary-light: #0ea397;
+  --ifm-color-primary-lighter: #0fab9e;
+  --ifm-color-primary-lightest: #14c2b3;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #2dd4bf;
+  --ifm-color-primary-dark: #1fc9b3;
+  --ifm-color-primary-darker: #1dbfaa;
+  --ifm-color-primary-darkest: #189d8c;
+  --ifm-color-primary-light: #45d9c8;
+  --ifm-color-primary-lighter: #52dccc;
+  --ifm-color-primary-lightest: #7be5d9;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}

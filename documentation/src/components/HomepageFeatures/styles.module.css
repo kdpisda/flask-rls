@@ -1,0 +1,17 @@
+.features {
+  display: flex;
+  align-items: center;
+  padding: 4rem 0;
+  width: 100%;
+}
+
+.feature {
+  padding: 1.5rem;
+  height: 100%;
+}
+
+.featureIcon {
+  font-size: 2.5rem;
+  color: var(--ifm-color-primary);
+  margin-bottom: 1rem;
+}
