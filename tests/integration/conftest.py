@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
@@ -11,6 +13,9 @@ APP_PW = "app_pw"
 OWNER_ROLE = "owner_role"
 OWNER_PW = "owner_pw"
 
+# The PostgreSQL image is overridable so CI can sweep every supported version.
+POSTGRES_IMAGE = os.environ.get("FLASK_RLS_TEST_POSTGRES_IMAGE", "postgres:16-alpine")
+
 
 @pytest.fixture(scope="session")
 def admin_url() -> str:
@@ -19,7 +24,7 @@ def admin_url() -> str:
     from testcontainers.postgres import PostgresContainer
 
     try:
-        container = PostgresContainer("postgres:16-alpine", driver="psycopg")
+        container = PostgresContainer(POSTGRES_IMAGE, driver="psycopg")
         container.start()
     except Exception as exc:  # pragma: no cover - environment without Docker
         pytest.skip(f"Docker/PostgreSQL not available: {exc}")
