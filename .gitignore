@@ -11,6 +11,9 @@ dist/
 .venv/
 venv/
 
+# uv — flask-rls is a library; the dev lockfile is not tracked
+uv.lock
+
 # Testing / coverage
 .pytest_cache/
 .coverage
